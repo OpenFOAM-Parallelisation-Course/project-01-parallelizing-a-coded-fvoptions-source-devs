@@ -1,0 +1,139 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2012                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      fvOptions;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+codedSource
+{
+    type            vectorCodedSource;
+    name            USrc;
+    active          true;
+
+    selectionMode   all;
+    fields          (U);
+
+    xmax           0.06;
+    ymax           0.06;
+    xmin           0.02;
+    ymin           0.02;
+    box ($xmin $ymin -1) ($xmax $ymax 1);
+    Sv  1e-3;
+
+    codeInclude
+    #{
+        #include "cellSet.H"
+        #include "boxToCell.H"
+    #};
+
+    codeCorrect
+    #{
+    #};
+
+    codeConstrain
+    #{
+    #};
+
+    codeAddSup
+    #{
+        Info<< "Executing codeAddSup" << endl;
+
+        auto isInsideBox = [&](const vector& pos) {
+            scalar xmin = readScalar(coeffs_.lookup("xmin"));
+            scalar xmax = readScalar(coeffs_.lookup("xmax"));
+            scalar ymin = readScalar(coeffs_.lookup("ymin"));
+            scalar ymax = readScalar(coeffs_.lookup("ymax"));
+            return pos[0] <= xmax && pos[0] >= xmin && pos[1] <= ymax && pos[1] >= ymin;
+        };
+
+        // Coefficients field
+        autoPtr<volScalarField> kPtr;
+        if (!Pstream::parRun()) {
+            kPtr.reset
+            (
+                new volScalarField
+                (
+                    IOobject
+                    (
+                        "k",
+                        Foam::name(mesh().time().startTime().value()),
+                        mesh(),
+                        IOobject::NO_READ,
+                        IOobject::NO_WRITE,
+                        false
+                    ),
+                    mesh(),
+                    dimensionedScalar("z", dimless, 0)
+                )
+            );
+        } else {
+            kPtr.reset
+            (
+                new volScalarField
+                (
+                    IOobject
+                    (
+                        "k",
+                        Foam::name(mesh().time().startTime().value()),
+                        mesh(),
+                        IOobject::MUST_READ,
+                        IOobject::NO_WRITE,
+                        false
+                    ),
+                    mesh()
+                )
+            );
+        }
+        volScalarField&  k = kPtr();
+
+        // Total source value
+        scalar Sv = readScalar(coeffs_.lookup("Sv"));
+
+        // Setup the box and select cells
+        //const word boxString = "(0.02 0.025 -1) (0.04 0.035 1)";
+        boxToCell box(mesh(), coeffs_.lookup("box"));
+        cellSet boxCells(mesh(), "boxCells", IOobject::NO_READ);
+        box.applyToSet(topoSetSource::setAction::NEW, boxCells);
+
+        // Randomize k if running in serial
+        if (!Pstream::parRun()) {
+            Random rd(1234);
+            for(auto& c: boxCells) {
+                k[c] = rd.sample01<scalar>();
+            }
+        }
+
+        // Apply source to the selected cells
+        vectorField& USource = eqn.source();
+        labelList  nNeis(mesh().nCells(), 1);
+        for(auto& c : boxCells) {
+            scalar kAvg = k[c];
+            // Loop through neighbours of cell c, to get an average value for k
+            for(auto& e : mesh().cellCells()[c]){
+                if (isInsideBox(mesh().C()[e]))
+                {
+                    kAvg += k[e];
+                    nNeis[c] += 1;
+                }
+            }
+            USource[c] = vector(Sv*kAvg, 0, 0);
+        }
+        for(auto& c : boxCells) {
+            USource[c] /= nNeis[c];
+        }
+        if (mesh().time().writeTime()) k.write();
+    #};
+}
+
+//
+// ************************************************************************* //

@@ -1,0 +1,27 @@
+#!/bin/sh
+cd "${0%/*}" || exit                                # Run from this directory
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
+#------------------------------------------------------------------------------
+
+set -e
+touch case.foam
+cp -rT 0.orig 0
+runApplication blockMesh
+
+# Serial run
+runApplication $(getApplication)
+
+# Move Resulting U away
+mv 0.5/U 0.5/USerial
+foamDictionary -entry "FoamFile.object" -set 'USerial' 0.5/USerial
+
+# Copy resulting k and decompose for parallel run
+if [ -f "0.5/k" ]; then
+    cp 0.5/k 0/k
+fi
+runApplication decomposePar -cellDist
+runParallel -a $(getApplication)
+
+runApplication reconstructPar -fields 'U' -time 0.5
+runApplication pvpython error.py
+cat log.pvpython
