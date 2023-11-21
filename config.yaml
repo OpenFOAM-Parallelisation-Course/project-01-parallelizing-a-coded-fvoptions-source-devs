@@ -1,9 +1,8 @@
 problem:
-  # Problem name to prefix output files with
   name: Project01
-  # The base OpenFOAM case; this needs to be fully functional case one paramters/files are substituted.
   template_case: 'case'
-  # Experiment paramters
+  type: 'param_variation'
+  models: auto
   parameters:
     Sv:
       type: range
@@ -35,52 +34,6 @@ problem:
       value_type: int
       bounds: [4, 8]
       log_scale: False
-  # Experiment objectives. Metric values are fetched through shell commands in the working directory of
-  # the specific trial
-  objectives:
-    MaxError:
-      command: ['awk', '/^Max/{print($6+0)}', 'log.pvpython']
-      threshold: 1e-6
-      minimize: True
-      lower_is_better: True
-
-meta:
-  # When clonging template case, specify extra files/dirs to clone
-  case_subdirs_to_clone: ["0.orig", "dynamicCode", "error.py", "plotK.py"]
-  # Where to clone trial cases
-  clone_destination: "./"
-  # Case run mode (local, slurm)
-  case_run_mode: local
-  # Metric evaluation mode (local, slurm)
-  metric_value_mode: local
-  # How should we run your case?
-  # Metric values are extracted through problem.objectives.*.command
-  # after completion of the following command
-  # The command is processed to provide a couple of variables:
-  # - $CASE_PATH: fullpath to **parameter variation case**
-  # - $CASE_NAME: generated name of the **parameter variation case**
-  case_run_command: ['./Allrun']
-  #case_run_command: ['sbatch', '-J', '$CASE_NAME', './Allrun.slurm', '$CASE_PATH']
-  # How to check for job completion?
-  # The output of this command is "split", and the second element is considered the status
-  # This has no effect if local mode is used
-  slurm_status_query: ['sacct', '--name', '$CASE_NAME', '-o', 'JobName%60,State', '-n']
-  # Number of trials to generate:
-  # Using SOBOL for paramter variation
-  # Model is automatically chosen for optimization studies
-  n_trials: 8
-  # Number of trials to deploy at the same time (in parallel)
-  n_parallel_trials: 2
-  # Try to use SAASBO, default is to use: GPEI
-  use_saasbo: True
-  # Number of pareto front points to generate
-  n_pareto_points: 10
-  # Paramters can be substitued as whole case files
-  # There are done first if present
-  #file_copies:
-  #modelType:
-  #  template: "/constant/transportProperties"
-  # Parameters can also be substituted per-file
   scopes:
     "/system/fvOptions":
       Sv: "codedSource.Sv"
@@ -90,11 +43,41 @@ meta:
       ymax: "codedSource.ymax"
     "/system/decomposeParDict":
       numberOfSubdomains: "numberOfSubdomains"
+  objectives:
+    MaxError:
+      mode: 'shell'
+      command: ['awk', '/^Max/{print($6+0)}', 'log.pvpython']
+      threshold: 1e-6
+      minimize: True
+      lower_is_better: True
 
-# Evaluate how the optimization algorithm did
-verify:
-  var1:
-    - Sv: 1e-4
-    - xmax: 0.06
-    - ymax: 0.06
-    - numberOfSubdomains: 4
+meta:
+  case_subdirs_to_clone:
+    - 0.orig
+    - dynamicCode
+    - error.py
+    - plotK.py
+  clone_destination: "./"
+  case_run_mode: local
+  metric_value_mode: local
+  case_run_command: ['./Allrun']
+  n_trials: 15
+  n_parallel_trials: 4
+  ttl_trial: 3600
+  init_poll_wait: 0.1
+  poll_factor: 1.5
+  timeout: 10
+  use_saasbo: False
+  n_pareto_points: 5
+  stopping_strategy:
+    improvement_bar: 1e-4
+    min_trials: 300
+    window_size: 10
+
+visualize:
+  update_interval: 15
+  n_latest_trials: 3
+  zscore_bar: 15
+  graph_height: 400
+  host: '0.0.0.0'
+  port: 8888

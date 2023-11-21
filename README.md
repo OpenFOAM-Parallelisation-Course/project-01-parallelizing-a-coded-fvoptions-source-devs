@@ -6,7 +6,7 @@ You have a coded `fvOptions` source to the velocity equation. But you notice it'
 when running in parallel. Your goal is to fix this issue and achieve consistency between parallel
 and serial runs of the case.
 
-> Master branch works with ESI OpenFOAM, there is a `of9` branch for Foundation version users. Unfortunately
+> Master branch works with ESI OpenFOAM, there is a `of10` branch for Foundation version users. Unfortunately
 > there is no support for fvOptions in foam-extend
 
 ## Used/needed software
@@ -19,20 +19,20 @@ and serial runs of the case.
 ## Initial state and objectives
 
 - The `case` runs in serial and delivers the expected result.
-- If you run `case/Allrun`, you'll notice inconsistency between serial and parallel runs of the same case though.
+- If you run `case/Allrun`, you'll notice some considerable inconsistency between serial and parallel runs of the same case though.
 - To Broaden your testing coverage, you may want to use parameter variation with `config.yaml` (Make sure you have awk installed).
 
 Simple instructions for running a parameter variation study:
 ```bash
-git clone https://github.com/FoamScience/OpenFOAM-Multi-Objective-Optimization study
-cp -r config.yaml study/
-cp -r case study/
-cd study
-pip install -r requirements.txt
-./paramVariation.py
+# Inside this repository
+# This will run a sensitivity study on the case with 15 trials
+# Parameters include: geometric properties of the source box, source intensity, and number of MPI subdomains
+# Objectives: absolute error in mag(U) between serial and parallel runs
+pip install foambo
+foambo
 ```
 
-You'll then find a `study/Project01_report_pv.csv` file containing parameter and metric values for each trial.
+You'll then find a `Project01_report.csv` file (among other things) containing parameter and metric values for each trial.
 
 Your objective is to modify `case/system/fvOptions` so that the `MaxError` column will always be near **1e-5** (Error in
 velocity as if the source was deactivated). Here is an example showcasing initial error values:
@@ -46,3 +46,6 @@ velocity as if the source was deactivated). Here is an example showcasing initia
 5  0.31942  0.000781 0.01 0.07 0.03 0.06                  5
 6  0.35654  0.000685 0.02 0.05 0.03 0.09                  5
 ```
+
+**In particular**, we want the "relative feature importance" of the `numberOfSubdomains` parameter to be
+very close to the importance of other variables. That would mean our parallel code can be trusted!
