@@ -151,7 +151,7 @@ codedSource
                 label bCell = mesh().faceOwner()[i+mesh().nInternalFaces()];
                 auto patch = mesh().boundaryMesh().whichPatch(i+mesh().nInternalFaces());
                 auto patchPtr = dynamic_cast<const processorPolyPatch*>(&mesh().boundaryMesh()[patch]);
-                if (bCellIsInBox[i] && patchPtr)
+                if (boxCells.find(bCell) != boxCells.end() && bCellIsInBox[i] && patchPtr)
                 {
                     // update source term
                     USource[bCell] += vector(Sv*kAtBoundary[i], 0, 0);
