@@ -34,6 +34,9 @@ codedSource
     #{
         #include "cellSet.H"
         #include "boxToCell.H"
+        #include "processorFvPatch.H"
+        #include "meshTools.H"
+        #include "syncTools.H"
     #};
 
     codeCorrect
@@ -47,14 +50,6 @@ codedSource
     codeAddSup
     #{
         Info<< "Executing codeAddSup" << endl;
-
-        auto isInsideBox = [&](const vector& pos) {
-            scalar xmin = readScalar(coeffs_.lookup("xmin"));
-            scalar xmax = readScalar(coeffs_.lookup("xmax"));
-            scalar ymin = readScalar(coeffs_.lookup("ymin"));
-            scalar ymax = readScalar(coeffs_.lookup("ymax"));
-            return pos[0] <= xmax && pos[0] >= xmin && pos[1] <= ymax && pos[1] >= ymin;
-        };
 
         // Coefficients field
         autoPtr<volScalarField> kPtr;
@@ -120,13 +115,50 @@ codedSource
             scalar kAvg = k[c];
             // Loop through neighbours of cell c, to get an average value for k
             for(auto& e : mesh().cellCells()[c]){
-                if (isInsideBox(mesh().C()[e]))
+                // Use the cell set to only include cells inside the box
+                if (boxCells.find(e) != boxCells.end())
                 {
                     kAvg += k[e];
                     nNeis[c] += 1;
                 }
             }
             USource[c] = vector(Sv*kAvg, 0, 0);
+        }
+
+        if (Pstream::parRun())
+        {
+            // A list of scalars to hold copies of K values at all boundary cells
+            // for current MPI rank
+            scalarList kAtBoundary(mesh().nBoundaryFaces(), 0);
+            // A boolean list to see if the corresponding boundary cell is inside the source box
+            boolList bCellIsInBox(mesh().nBoundaryFaces(), false);
+            // populate kAtBoundary and bCellInBox with correct values
+            forAll(kAtBoundary, i)
+            {
+                auto patch = mesh().boundaryMesh().whichPatch(i+mesh().nInternalFaces());
+                auto facei = i + mesh().nInternalFaces() - mesh().boundary()[patch].start();
+                auto bCell = mesh().faceOwner()[i+mesh().nInternalFaces()];
+                kAtBoundary[i] = k[bCell];
+                bCellIsInBox[i] = boxCells.find(bCell) != boxCells.end();
+            }
+            // Swap boundary lists between processor-to-processor interfaces
+            syncTools::swapBoundaryFaceList(mesh(), kAtBoundary);
+            syncTools::swapBoundaryFaceList(mesh(), bCellIsInBox);
+            // Loop through processor faces, add source term if the swapped value was on
+            // a cell inside the source box on the other side of the processor interface
+            forAll(kAtBoundary, i)
+            {
+                label bCell = mesh().faceOwner()[i+mesh().nInternalFaces()];
+                auto patch = mesh().boundaryMesh().whichPatch(i+mesh().nInternalFaces());
+                auto patchPtr = dynamic_cast<const processorPolyPatch*>(&mesh().boundaryMesh()[patch]);
+                if (boxCells.find(bCell) != boxCells.end() && bCellIsInBox[i] && patchPtr)
+                {
+                    // update source term
+                    USource[bCell] += vector(Sv*kAtBoundary[i], 0, 0);
+                    // update number of neighbours
+                    nNeis[bCell] += 1;
+                }
+            }
         }
         for(auto& c : boxCells) {
             USource[c] /= nNeis[c];
